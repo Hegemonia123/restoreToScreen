@@ -7,8 +7,13 @@ const screenChangeListeners = {}; // Function handles for disconnecting event li
 const log = (...params) => DEBUG && console.log('restoreToScreen::', params.join(' '));
 
 
+const isHandleable = cli => cli.normalWindow;
+
+
 const setScreen = cli => {
-    log('setScreen', cli.resourceName );
+    if (workspace.numScreens == 1) return;
+
+    log('setScreen', cli.resourceName, 'config', workspace.numScreens, 'client screen', cli.screen);
     if (!clientScreens[workspace.numScreens]) clientScreens[workspace.numScreens] = {};
     clientScreens[workspace.numScreens][cli] = cli.screen;
     // log('state', JSON.stringify(clientScreens[workspace.numScreens], null, 2))
@@ -16,18 +21,24 @@ const setScreen = cli => {
 
 
 const restoreScreens = (screenCnt) => {
+    if (workspace.numScreens == 1) return;
+
     log('restoreScreens', screenCnt);
-    const conf = clientScreens[screenCnt];
-    if (!conf) return;
 
     workspace.clientList()
-        .filter(cli => conf[cli] !== undefined && conf[cli] !== cli.screen)
-        .forEach(cli => workspace.sendClientToScreen(cli, conf[cli]));
+        .filter(isHandleable)
+        .forEach(cli => {
+            const target = (clientScreens[screenCnt] || {})[cli] ?? 0; // Use primary screen (0) by default
+            if (target != cli.screen) {
+                log('sending', cli.resourceName, 'from', cli.screen, 'to', target);
+                workspace.sendClientToScreen(cli, target);
+            }
+        });
 };
 
 
 const registerClient = cli => {
-    if (!cli.normalWindow) return;
+    if (!isHandleable(cli)) return;
     log('registerClient', cli.resourceName);
     cli.clientFinishUserMovedResized.connect(setScreen)
 
