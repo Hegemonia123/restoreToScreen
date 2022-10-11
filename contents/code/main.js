@@ -1,8 +1,8 @@
 const DEBUG = false;
-const UNDO_TRESHOLD_MS = 2000;
+const UNDO_TRESHOLD_MS = 3000;
 
 const clientScreens = {};
-const previousScreens = {};
+let history = [];
 const screenChangeListeners = {}; // Function handles for disconnecting event listeners.
 
 
@@ -12,16 +12,25 @@ const log = (...params) => DEBUG && console.log('restoreToScreen::', params.join
 const isHandleable = cli => cli.normalWindow;
 
 
+const cleanHistory = () => {
+    log('cleanHistory:before', history.length);
+    history = history.filter(conf => conf.moved > Date.now() - UNDO_TRESHOLD_MS);
+    log('cleanHistory:after', history.length);
+};
+
+
 const setScreen = cli => {
     log('setScreen:', cli.resourceName, 'config:', workspace.numScreens, 'client screen:', cli.screen);
     if (!clientScreens[workspace.numScreens]) clientScreens[workspace.numScreens] = {};
 
-    previousScreens[cli] = {
+    cleanHistory();
+    history.push({
+        cli: String(cli),
         resourceName: cli.resourceName,
         numScreens: workspace.numScreens,
         screen: clientScreens[workspace.numScreens][cli] || 0,
         moved: Date.now()
-    };
+    });
 
     clientScreens[workspace.numScreens][cli] = cli.screen;
     // log('state', JSON.stringify(clientScreens[workspace.numScreens], null, 2))
@@ -32,12 +41,14 @@ const onNumberScreensChanged = (screenCnt) => {
     log('onNumberScreensChanged', screenCnt);
 
     // Undo moves that happened within few seconds, because they were propably triggered by kwin itself prior to disconnecting a screen.
-    Object.entries(previousScreens)
-        .filter(([_, conf]) => conf.moved > Date.now() - UNDO_TRESHOLD_MS)
-        .forEach(([cli, conf]) => {
+    cleanHistory();
+    history
+        .reverse()
+        .forEach(conf => {
             log('Undoing previous setScreen:', conf.resourceName)
-            clientScreens[conf.numScreens][cli] = conf.screen
+            clientScreens[conf.numScreens][conf.cli] = conf.screen
         });
+    history = []; // History can be ditched after every move has been undone.
 
     workspace.clientList()
         .filter(isHandleable)
@@ -75,7 +86,7 @@ const unregisterClient = cli => {
 
     Object.values(clientScreens).forEach(config => delete config[cli]);
 
-    delete previousScreens[cli];
+    history = history.filter(conf => conf.cli != cli);
 };
 
 
