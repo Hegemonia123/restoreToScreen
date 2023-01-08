@@ -2,7 +2,7 @@ const DEBUG = false;
 const UNDO_TRESHOLD_MS = 3000;
 
 const clientScreens = {};
-let history = [];
+let history = []; // Move history used for undoing moves that kwin does automatically
 const screenChangeListeners = {}; // Function handles for disconnecting event listeners.
 
 
@@ -10,6 +10,23 @@ const log = (...params) => DEBUG && console.log('restoreToScreen::', params.join
 
 
 const isHandleable = cli => cli.normalWindow;
+
+
+const getScreenSetup = () => {
+    // Hacky method to parse screen names and indexes from supportInformation
+    const screens = (workspace.supportInformation().match(/Screen \d:(.|\n)+=====/)[0] || '')
+        .split(/Screen/)
+        .map(val => val.trim())
+        .filter(Boolean)
+        .reduce((res, cur) => Object.assign(res, { [cur[0]]: cur.match(/Name:.+\n/)[0].split(' ')[1].trim() }), {});
+
+    return {
+        getPrimary: () => screens[0],
+        getScreen: (cli) => screens[cli.screen],
+        getScreenNum: (screenName) => Object.entries(screens).find(([, name]) => name === screenName)[0],
+        getLayoutId: () => Object.values(screens).join()
+    };
+}
 
 
 const cleanHistory = () => {
@@ -20,25 +37,28 @@ const cleanHistory = () => {
 
 
 const setScreen = cli => {
-    log('setScreen:', cli.resourceName, 'config:', workspace.numScreens, 'client screen:', cli.screen);
-    if (!clientScreens[workspace.numScreens]) clientScreens[workspace.numScreens] = {};
+    const screens = getScreenSetup();
+    const layoutId = screens.getLayoutId();
+    log('setScreen:', cli.resourceName, 'config:', layoutId, 'client screen:', cli.screen, 'screenName', screens.getScreen(cli));
+    if (!clientScreens[layoutId]) clientScreens[layoutId] = {};
 
     cleanHistory();
     history.push({
         cli: String(cli),
         resourceName: cli.resourceName,
-        numScreens: workspace.numScreens,
-        screen: clientScreens[workspace.numScreens][cli] || 0,
+        layoutId,
+        screen: clientScreens[layoutId][cli] || screens.getPrimary(),
         moved: Date.now()
     });
 
-    clientScreens[workspace.numScreens][cli] = cli.screen;
-    // log('state', JSON.stringify(clientScreens[workspace.numScreens], null, 2))
+    clientScreens[layoutId][cli] = screens.getScreen(cli);
+    // log('state', JSON.stringify(clientScreens[layoutId], null, 2))
 };
 
 
 const onNumberScreensChanged = (screenCnt) => {
-    log('onNumberScreensChanged', screenCnt);
+    const screens = getScreenSetup();
+    log('onNumberScreensChanged', screenCnt, screens.getLayoutId());
 
     // Undo moves that happened within few seconds, because they were propably triggered by kwin itself prior to disconnecting a screen.
     cleanHistory();
@@ -46,17 +66,18 @@ const onNumberScreensChanged = (screenCnt) => {
         .reverse()
         .forEach(conf => {
             log('Undoing previous setScreen:', conf.resourceName)
-            clientScreens[conf.numScreens][conf.cli] = conf.screen
+            clientScreens[conf.layoutId][conf.cli] = conf.screen
         });
     history = []; // History can be ditched after every move has been undone.
-
+    
+    // Restore windows to screens they were before.
     workspace.clientList()
         .filter(isHandleable)
         .forEach(cli => {
-            const target = (clientScreens[screenCnt] || {})[cli] ?? 0; // Use primary screen (0) by default
-            if (target != cli.screen) {
-                log('sending', cli.resourceName, 'from', cli.screen, 'to', target);
-                workspace.sendClientToScreen(cli, target);
+            const target = (clientScreens[screens.getLayoutId()] || {})[cli] ?? screens.getPrimary(); // Move to primary screen by default
+            if (target != screens.getScreen(cli)) {
+                log('sending', cli.resourceName, 'from', screens.getScreen(cli), 'to', target, ' (', screens.getScreenNum(target), ')');
+                workspace.sendClientToScreen(cli, screens.getScreenNum(target));
             }
         });
 };
