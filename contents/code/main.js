@@ -20,7 +20,7 @@ const getScreenSetup = () => {
         .split(/Screen/)
         .map(val => val.trim())
         .filter(Boolean)
-        .filter(val => val.includes('Enabled: 1'))
+        .filter(val => !val.includes('Enabled: 0'))
         .reduce((res, cur, idx) => Object.assign(res, { [idx]: cur.match(/Name:.+\n/)[0].split(' ')[1].trim() }), {});
 
     log('getScreenSetup:screens', JSON.stringify(screens, null, 2));
